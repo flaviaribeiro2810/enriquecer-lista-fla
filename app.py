@@ -5,84 +5,87 @@ import json
 import time
 import io
 
-# Configuração da Página
-st.set_page_config(page_title="Athalaia Enriquecimento", layout="wide")
+st.set_page_config(page_title="Athalaia Inteligência V2", layout="wide")
 
-st.title("🚀 Enriquecedor Athalaia Gráfica")
-st.markdown("### Inteligência Comercial para Impressão Offset")
+st.title("🚀 Enriquecedor Athalaia: Validação e Expansão")
 
-# Sidebar - Configurações que você pode mudar na hora
 with st.sidebar:
     st.header("Configurações")
     api_key = st.text_input("Sua Gemini API Key:", type="password")
-    st.info("O ICP abaixo será usado para filtrar e gerar insights para esta lista específica.")
-    icp_atual = st.text_area("Defina o ICP desta lista:", 
-                             placeholder="Ex: Gerentes de Marketing de indústrias farmacêuticas...")
+    icp_segmento = st.selectbox("Selecione o Segmento do Briefing:", 
+                                ["Segmento 1 - Editoras", 
+                                 "Segmento 2 - ONGs (Norte)", 
+                                 "Segmento 3 - Escolas (CO/Acre)", 
+                                 "Segmento 4 - Marketing (DF)"])
+    st.info("O robô validará seus dados atuais e buscará os faltantes (2 Fixos + 2 Celulares).")
 
 if not api_key:
-    st.warning("👈 Insira sua API Key na barra lateral para começar.")
+    st.warning("👈 Insira sua API Key para começar.")
 else:
     genai.configure(api_key=api_key)
-    # Usando o modelo Pro para maior assertividade e menos erros
     model = genai.GenerativeModel('gemini-1.5-pro')
 
-    # Upload do arquivo
-    uploaded_file = st.file_uploader("Importar planilha (CSV ou XLSX)", type=['csv', 'xlsx'])
+    file = st.file_uploader("Importar Lista de Prospecção", type=['csv', 'xlsx'])
 
-    if uploaded_file:
-        # Carregar os dados
-        if uploaded_file.name.endswith('.xlsx'):
-            df = pd.read_excel(uploaded_file)
-        else:
-            df = pd.read_csv(uploaded_file)
-        
-        st.write(f"Carregados {len(df)} leads. Veja os primeiros:")
-        st.dataframe(df.head(3))
+    if file:
+        df = pd.read_excel(file) if file.name.endswith('.xlsx') else pd.read_csv(file)
+        st.write("Dados Originais:", df.head(3))
 
-        if st.button("🚀 Iniciar Enriquecimento"):
-            resultados_finais = []
-            progresso = st.progress(0)
-            status = st.empty()
+        if st.button("🚀 Iniciar Processamento Inteligente"):
+            final_data = []
+            prog = st.progress(0)
             
             for i, row in df.iterrows():
-                status.text(f"Buscando dados do lead {i+1} de {len(df)}...")
+                # Enviamos os dados que você já tem para o robô validar
+                prompt = f"""
+                DADOS ATUAIS: {row.to_dict()}
+                SEGMENTO BRIEFING: {icp_segmento}
                 
-                # O prompt que o código envia para o Gemini
-                prompt_chamada = f"""
-                LEAD ATUAL: {row.to_dict()}
-                ICP SOLICITADO: {icp_atual}
+                TAREFA:
+                1. Valide se os telefones e e-mails atuais estão corretos para o decisor.
+                2. Se corretos, mantenha-os. Se errados, substitua.
+                3. Complete até ter: 2 Telefones Fixos e 2 Celulares (WhatsApp).
+                4. Verifique se a empresa segue o CNAE/Regra do Segmento.
                 
-                Instrução: Enriqueça este lead conforme as regras do sistema (Especialista Athalaia).
-                Seja assertivo, procure dados reais e crie o insight para venda de OFFSET.
-                Responda APENAS o objeto JSON puro.
+                Retorne APENAS JSON:
+                {{
+                  "status_validacao": "Mantido / Enriquecido / Substituído",
+                  "nome_decisor": "",
+                  "cargo_confirmado": "",
+                  "email_1": "",
+                  "fixo_1": "",
+                  "fixo_2": "",
+                  "celular_1": "",
+                  "celular_2": "",
+                  "faturamento_estimado": "",
+                  "linkedin": "",
+                  "insight_venda_offset": ""
+                }}
                 """
                 
                 try:
-                    response = model.generate_content(prompt_chamada)
-                    # Limpa o texto da resposta para evitar erro de JSON
+                    response = model.generate_content(prompt)
                     limpo = response.text.replace('```json', '').replace('```', '').strip()
-                    dados_json = json.loads(limpo)
-                    resultados_finais.append(dados_json)
-                except Exception as e:
-                    resultados_finais.append({"erro": "Não processado", "detalhe": str(e)})
+                    final_data.append(json.loads(limpo))
+                except:
+                    final_data.append({"status_validacao": "Erro"})
                 
-                progresso.progress((i + 1) / len(df))
-                # Pausa pequena para não ser bloqueado pela API (Rate Limit)
-                time.sleep(2) 
+                prog.progress((i + 1) / len(df))
+                time.sleep(2)
 
-            # Gerar tabela final
-            df_enriquecido = pd.concat([df, pd.DataFrame(resultados_finais)], axis=1)
-            st.success("✅ Enriquecimento concluído com sucesso!")
-            st.dataframe(df_enriquecido)
-
-            # Botão de Exportar para Excel
-            output = io.BytesIO()
-            with pd.ExcelWriter(output, engine='openpyxl') as writer:
-                df_enriquecido.to_excel(writer, index=False)
+            df_final = pd.concat([df, pd.DataFrame(final_data)], axis=1)
             
-            st.download_button(
-                label="📥 Baixar Lista Enriquecida (XLSX)",
-                data=output.getvalue(),
-                file_name="leads_athalaia_final.xlsx",
-                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-            )
+            # Aplicando cores para facilitar sua leitura
+            def color_status(val):
+                color = 'white'
+                if val == 'Enriquecido': color = '#C6F6D5' # Verde claro
+                if val == 'Substituído': color = '#FEEBC8' # Laranja claro
+                return f'background-color: {color}'
+
+            st.success("✅ Processamento concluído!")
+            st.dataframe(df_final.style.applymap(color_status, subset=['status_validacao']))
+
+            # Exportação
+            output = io.BytesIO()
+            df_final.to_excel(output, index=False)
+            st.download_button("📥 Baixar Planilha Athalaia Qualificada", output.getvalue(), "leads_qualificados.xlsx")
